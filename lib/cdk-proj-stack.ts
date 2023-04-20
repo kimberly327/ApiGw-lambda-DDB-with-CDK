@@ -2,7 +2,6 @@ import { Stack, StackProps }from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
 export class CdkProjStack extends Stack {
@@ -10,6 +9,7 @@ export class CdkProjStack extends Stack {
     super(scope, id, props);
 
     const dynamodb_table = new dynamodb.Table(this, "Table", {
+      tableName: 'DDB-Table',
       partitionKey: { name: "PK", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "SK", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST
@@ -21,7 +21,9 @@ export class CdkProjStack extends Stack {
 
     dynamodb_table.grantReadWriteData(integrationRole);
 
-    const api = new apigateway.RestApi(this, 'api', {});
+    const api = new apigateway.RestApi(this, 'api', {
+      restApiName: 'Api-Endpoint'
+    });
 
     const sendMessageIntegration = new apigateway.AwsIntegration({
       service: 'dynamodb',
