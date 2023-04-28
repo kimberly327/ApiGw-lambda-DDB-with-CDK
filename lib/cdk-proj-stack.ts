@@ -1,6 +1,7 @@
 import { Stack, StackProps }from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
@@ -15,34 +16,25 @@ export class CdkProjStack extends Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST
     });
 
-    const integrationRole = new iam.Role(this, 'IntegrationRole', {
-      assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com')
+    const lambdaFunction = new lambda.Function(this, "lambdaFunction", {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      handler: "index.handler",
+      code: lambda.Code.fromAsset("src"),
+      environment: {
+        DYNAMODB: dynamodb_table.tableName
+      },
     });
+    
+    dynamodb_table.grantReadWriteData(lambdaFunction.role!);
 
-    dynamodb_table.grantReadWriteData(integrationRole);
-
-    const api = new apigateway.RestApi(this, 'api', {
-      restApiName: 'Api-Endpoint'
-    });
-
-    const sendMessageIntegration = new apigateway.AwsIntegration({
-      service: 'dynamodb',
-      integrationHttpMethod: 'POST',
-      action: 'PutItem',
-      options: {
-        credentialsRole: integrationRole,
-        requestParameters: {
-          'integration.request.querystring.who': 'method.request.querystring.who'
-        },
+    const api = new apigateway.LambdaRestApi(this, 'api', {
+      handler: lambdaFunction,
+      proxy: false,
+      integrationOptions: {
         requestTemplates: {
           'application/json': JSON.stringify({
-            'TableName': dynamodb_table.tableName,
-            'Item': {
-              'PK': { 'S': "$context.requestTimeEpoch" },
-              'SK': { 'S': "Detail" },
-              'userId': {"S": "$util.escapeJavaScript($input.json('$.userId'))" },
-              'roomId': {"S": "$util.escapeJavaScript($input.json('$.roomId'))" }
-            }       
+            'userId': { "S": "$util.escapeJavaScript($input.json('$.userId'))" },
+            'roomId': { "S": "$util.escapeJavaScript($input.json('$.roomId'))" }
           })
         },
         integrationResponses: [
@@ -56,15 +48,12 @@ export class CdkProjStack extends Stack {
             statusCode: '500',
           }
         ]
-      },
+      }
     });
 
     const writing = api.root.addResource('addingItem');
     
-    writing.addMethod('POST', sendMessageIntegration, {
-      requestParameters: {
-        'method.request.querystring.who': true
-      },
+    writing.addMethod('POST', new apigateway.LambdaIntegration(lambdaFunction), {
       requestValidatorOptions: {
         requestValidatorName: 'test-validator',
         validateRequestBody: true,
