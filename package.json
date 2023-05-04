@@ -2,7 +2,7 @@
   "name": "cdk-proj",
   "version": "0.1.0",
   "bin": {
-    "cdk-proj": "bin/cdk-proj.js"
+    "cdk-proj": "bin/cdk-proj-stack.js"
   },
   "scripts": {
     "build": "tsc",

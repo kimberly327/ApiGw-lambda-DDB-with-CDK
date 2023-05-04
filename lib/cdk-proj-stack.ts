@@ -1,9 +1,10 @@
 import { Stack, StackProps }from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as path from 'path';
 
 export class CdkProjStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -16,49 +17,64 @@ export class CdkProjStack extends Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST
     });
 
-    const lambdaFunction = new lambda.Function(this, "lambdaFunction", {
+    const writeFunction = new lambdaNode.NodejsFunction(this, "writeFunction", {
       runtime: lambda.Runtime.NODEJS_18_X,
-      handler: "index.handler",
-      code: lambda.Code.fromAsset("src"),
+      entry: path.join(__dirname, "../src/write/index.ts"),
+      handler: 'handler',
+      environment: {
+        DYNAMODB: dynamodb_table.tableName
+      },
+    });
+
+    const readFunction = new lambdaNode.NodejsFunction(this, "readFunction", {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      entry: path.join(__dirname, "../src/read/index.ts"),
+      handler: 'handler',
       environment: {
         DYNAMODB: dynamodb_table.tableName
       },
     });
     
-    dynamodb_table.grantReadWriteData(lambdaFunction.role!);
-
-    const api = new apigateway.LambdaRestApi(this, 'api', {
-      handler: lambdaFunction,
-      proxy: false,
-      integrationOptions: {
-        requestTemplates: {
-          'application/json': JSON.stringify({
-            'userId': { "S": "$util.escapeJavaScript($input.json('$.userId'))" },
-            'roomId': { "S": "$util.escapeJavaScript($input.json('$.roomId'))" }
-          })
-        },
-        integrationResponses: [
-          {
-            statusCode: '200',
-          },
-          {
-            statusCode: '400',
-          },
-          {
-            statusCode: '500',
-          }
-        ]
-      }
+    dynamodb_table.grantReadWriteData(writeFunction.role!);
+    dynamodb_table.grantReadData(readFunction.role!);
+    
+    const api = new apigateway.RestApi(this, 'Api', {
+      restApiName: 'MyApi',
     });
 
-    const writing = api.root.addResource('addingItem');
+    const writeModel = api.addModel('write-validator-model', {
+      schema: {
+        properties: {
+          userId: { 
+            type: apigateway.JsonSchemaType.STRING
+          },
+          roomId: { 
+            type: apigateway.JsonSchemaType.STRING
+          },
+        },
+        required: ['userId', 'roomId']
+      }
+    })
+
+    const readModel = api.addModel('read-validator-model', {
+      schema: {
+        properties: {
+          PK: { 
+            type: apigateway.JsonSchemaType.STRING
+          },
+        },
+        required: ['PK']
+      }
+    })
+
+    api.addRequestValidator('validator', {
+      validateRequestBody: true,
+      validateRequestParameters: false
+    })
+
+    const dynamo = api.root.addResource('dynamo');
     
-    writing.addMethod('POST', new apigateway.LambdaIntegration(lambdaFunction), {
-      requestValidatorOptions: {
-        requestValidatorName: 'test-validator',
-        validateRequestBody: true,
-        validateRequestParameters: false
-      },
+    dynamo.addMethod('POST', new apigateway.LambdaIntegration(writeFunction), {
       methodResponses: [
         {
           statusCode: '400',
@@ -69,7 +85,27 @@ export class CdkProjStack extends Stack {
         {
           statusCode: '500',
         }
-      ]
+      ],
+      requestModels: { 
+        'application/json': writeModel
+      }
+    });
+
+    dynamo.addMethod('GET', new apigateway.LambdaIntegration(readFunction), {
+      methodResponses: [
+        {
+          statusCode: '400',
+        },
+        {
+          statusCode: '200',
+        },
+        {
+          statusCode: '500',
+        }
+      ],
+      requestModels: { 
+        'application/json': readModel
+      }
     });
     
   }
